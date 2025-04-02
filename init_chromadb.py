@@ -3,10 +3,16 @@ import chromadb
 # Initialize ChromaDB client
 client = chromadb.Client()
 
-# Create collections for each project and a general one
-client.create_collection("ProjectA")
-client.create_collection("ProjectB")
-client.create_collection("ProjectC")
-client.create_collection("General")
+# List of collections
+projects = ["ProjectA", "ProjectB", "ProjectC", "General"]
 
-print("ChromaDB collections created.")
+# Create collections and add sample data
+for project in projects:
+    collection = client.create_collection(project)
+    collection.add(
+        documents=[f"Sample document for {project}"],
+        metadatas=[{"source": "sample"}],
+        ids=[f"doc1_{project}"]
+    )
+
+print("ChromaDB collections created with sample data.")
