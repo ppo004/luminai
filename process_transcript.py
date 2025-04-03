@@ -1,36 +1,32 @@
 import chromadb
 from sentence_transformers import SentenceTransformer
 
-def process_transcript(project, transcript_path):
-    # Initialize ChromaDB client
+def process_transcript(user_id, project, transcript_path):
+    # Set up persistent ChromaDB client
     persist_directory = "chroma_db"
     client = chromadb.PersistentClient(path=persist_directory)
-
-    # Load the embedding model, specifying from_tf=True
-    model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
-
-    # Read the transcript
-    with open(transcript_path, 'r') as file:
+    
+    # Create or get user-specific collection
+    collection_name = f"{project}_{user_id}"
+    collection = client.get_or_create_collection(collection_name)
+    
+    # Load embedding model
+    # model = SentenceTransformer('all-MiniLM-L6-v2')
+    
+    # Read and process transcript
+    with open(transcript_path, 'r', encoding='utf-8') as file:
         transcript = file.read()
-
-    # Generate embedding
-    embedding = model.encode(transcript).tolist()
-
-    # Get or create the collection for the project
-    collection = client.get_or_create_collection(project)
-
-    # Add the transcript to the collection
+    
+    # embedding = model.encode(transcript).tolist()
     collection.add(
         documents=[transcript],
-        embeddings=[embedding],
+        # embeddings=[embedding],
         metadatas=[{"source": transcript_path}],
-        ids=[f"transcript_{project}"]
+        ids=[f"transcript_{user_id}"]
     )
-
-    print(f"Transcript for {project} processed and added to the collection.")
+    
+    print(f"Transcript for {user_id} in {project} processed.")
 
 # Example usage
 if __name__ == "__main__":
-    project = "ProjectA"  # Assume user selected Project A
-    transcript_path = "transcripts/shivaji.txt"
-    process_transcript(project, transcript_path)
+    process_transcript("user1", "ProjectA", "transcripts/transcript.txt")

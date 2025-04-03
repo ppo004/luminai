@@ -2,24 +2,38 @@ import chromadb
 import requests
 import json
 
-def query_collection(project, query_text):
+def query_collections(user_id, project, query_text):
+    # Set up persistent ChromaDB client
     persist_directory = "chroma_db"
     client = chromadb.PersistentClient(path=persist_directory)
-    collection = client.get_collection(project)
-    results = collection.query(
-        query_texts=[query_text],
-        n_results=1
-    )
-    return results['documents'][0][0]
+    
+    # Query shared collection
+    shared_collection = client.get_collection(f"{project}_shared")
+    shared_results = shared_collection.query(query_texts=[query_text], n_results=1)
+    shared_doc = shared_results['documents'][0][0] if shared_results['documents'] else ""
+    
+    # Query user-specific collection (if it exists)
+    user_collection_name = f"{project}_{user_id}"
+    user_doc = ""
+    try:
+        user_collection = client.get_collection(user_collection_name)
+        user_results = user_collection.query(query_texts=[query_text], n_results=1)
+        user_doc = user_results['documents'][0][0] if user_results['documents'] else ""
+    except ValueError:
+        # Collection doesn’t exist for this user yet
+        pass
+    
+    return f"Shared: {shared_doc}\nUser: {user_doc}"
 
 def get_llama3_response(prompt):
+    # Call LLaMA3 API (assumes it’s running locally)
     response = requests.post(
         "http://localhost:11434/api/generate",
-        json={"model": "llama3:8b", "prompt": prompt, "stream": True},  # Enable streaming
-        stream=True  # Tell requests to expect a stream
+        json={"model": "llama3:8b", "prompt": prompt, "stream": True},
+        stream=True
     )
-    response.raise_for_status()  # Raise an exception for bad status codes
-
+    response.raise_for_status()
+    
     full_response = ""
     for line in response.iter_lines():
         if line:
@@ -28,23 +42,20 @@ def get_llama3_response(prompt):
                 if 'response' in json_data:
                     full_response += json_data['response']
             except json.JSONDecodeError as e:
-                print(f"Error decoding JSON chunk: {e}, line: {line.decode('utf-8')}")
-                continue  # Skip problematic chunks
-
+                print(f"Error decoding JSON chunk: {e}")
+                continue
     return full_response
 
-def rag_query(project, query_text):
-    # Retrieve relevant document from the collection
-    relevant_doc = query_collection(project, query_text)
-    # Combine document and query into a prompt
-    prompt = f"Context: {relevant_doc}\n\nQuery: {query_text}\n\nResponse:"
-    # Get response from Llama 3
-    response = get_llama3_response(prompt)
-    return response
+def rag_query(user_id, project, query_text):
+    # Get context from shared and user data
+    context = query_collections(user_id, project, query_text)
+    prompt = f"Context: {context}\n\nQuery: {query_text}\n\nResponse:"
+    return get_llama3_response(prompt)
 
-# Test the RAG logic
+# Example usage
 if __name__ == "__main__":
+    user_id = "user1"
     project = "ProjectA"
-    query = "What is the main topic?"
-    response = rag_query(project, query)
+    query = "Who fought in Battle of Purandar?"
+    response = rag_query(user_id, project, query)
     print(response)
