@@ -5,8 +5,10 @@ import re
 from sentence_transformers import SentenceTransformer
 import os
 
+# Load the embedding model
 model_path = os.path.join(os.path.dirname(__file__), "models", "all-mpnet-base-v2")
 embedding_model = SentenceTransformer(model_path)
+
 # --- Query Functions ---
 
 def query_shared_collection(project, query_text, n_results=1):
@@ -21,6 +23,7 @@ def query_shared_collection(project, query_text, n_results=1):
     return "No shared project data available."
 
 def query_user_collection(user_id, project, query_text, n_results=1):
+    """Retrieve document and meeting type from the user-specific collection."""
     persist_directory = "chroma_db"
     client = chromadb.PersistentClient(path=persist_directory)
     collection_name = f"{project}_{user_id}"
@@ -29,10 +32,12 @@ def query_user_collection(user_id, project, query_text, n_results=1):
         query_embedding = embedding_model.encode(query_text).tolist()  # Encode the query
         results = collection.query(query_embeddings=[query_embedding], n_results=n_results)
         if results['documents'] and results['documents'][0]:
-            return "\n".join([f"- {doc}" for doc in results['documents'][0]])
-        return "No user-specific data available."
+            doc = results['documents'][0][0]  # Get the first document
+            meeting_type = results['metadatas'][0][0].get("meeting_type", "Unknown")  # Get meeting type from metadata
+            return doc, meeting_type
+        return "No user-specific data available.", "Unknown"
     except ValueError:
-        return "No user-specific data available."
+        return "No user-specific data available.", "Unknown"
 
 # --- Llama 3 Response ---
 def get_llama3_response(prompt):
@@ -58,30 +63,47 @@ def get_llama3_response(prompt):
 
 # --- Optimized RAG Query ---
 def rag_query(user_id, project, query_text):
-    """Generate an optimized RAG prompt and get a response."""
-    # Retrieve documents
+    """Generate an optimized RAG prompt tailored to the meeting type and query intent."""
+    # Retrieve documents and meeting type
     shared_docs = query_shared_collection(project, query_text, n_results=2)
-    user_docs = query_user_collection(user_id, project, query_text, n_results=1)
+    user_doc, meeting_type = query_user_collection(user_id, project, query_text, n_results=1)
     
-    # Determine query type and tailor instructions
-    is_summarization = bool(re.search(r"summari[zs]e|summary", query_text, re.IGNORECASE))
-    if is_summarization:
-        instruction = """Provide a concise summary of the video transcript, incorporating relevant details from the shared project data."""
+    # Set base instruction based on meeting type
+    if meeting_type == "Technical Meeting":
+        base_instruction = "Focus on technical details, problem-solving steps, project updates, and action items."
+    elif meeting_type == "KT Session":
+        base_instruction = "Summarize key knowledge points, explain concepts clearly with examples if possible, and highlight processes or best practices."
+    elif meeting_type == "Townhall Meeting":
+        base_instruction = "Offer insights into company announcements, policy changes, and strategic directions in a concise and narrative style."
     else:
-        instruction = """Answer the query based on the provided context, using both shared and user-specific data."""
+        base_instruction = "Provide a relevant response based on the available data."
+
+    # Detect query intent
+    is_summarization = bool(re.search(r"summari[zs]e|summary", query_text, re.IGNORECASE))
+    is_explanation = bool(re.search(r"explain|why|how", query_text, re.IGNORECASE))
+    
+    if is_summarization:
+        instruction = f"Provide a concise summary (2-3 sentences) that {base_instruction.lower()}"
+    elif is_explanation:
+        instruction = f"Offer a clear, step-by-step explanation that {base_instruction.lower()}"
+    else:
+        instruction = f"Answer the query directly and accurately, ensuring to {base_instruction.lower()}"
 
     # Build the optimized prompt
-    prompt = f"""You are an assistant helping with project-related queries. You have access to two types of information:
-1. **Shared Project Data**: General information about the project, accessible to all users.
-2. **User-Specific Data**: Information from the user's uploaded video transcript, private to them.
+    prompt = f"""You are a professional AI assistant for an IT company, specializing in analyzing and responding to queries based on technical meetings, knowledge transfer (KT) sessions, and townhall meetings. Your goal is to deliver clear, accurate, and contextually relevant responses to assist employees.
 
-{instruction} If there is no user-specific data, rely solely on the shared project data to provide a response.
+**Instructions**:
+- {instruction}
+- Use a professional yet approachable tone.
+- For technical queries, provide detailed explanations and define complex terms if necessary; for broader queries, focus on key points.
+- If the query is unclear, ask the user for clarification.
+- If user-specific data is unavailable, rely on shared project data to provide a general response.
 
 **Shared Project Data**:
 {shared_docs}
 
-**User-Specific Data**:
-{user_docs}
+**User-Specific Data ({meeting_type} Transcript)**:
+{user_doc if user_doc != "No user-specific data available." else "None available."}
 
 **Query**:
 {query_text}
@@ -108,10 +130,3 @@ if __name__ == "__main__":
     response2 = rag_query(user_id, project, query2)
     print("\nSummarization Response:")
     print(response2)
-    
-    # Test with a different user (no user-specific data yet)
-    # user_id2 = "user2"
-    # query3 = "What is the main topic?"
-    # response3 = rag_query(user_id2, project, query3)
-    # print("\nUser2 (No Transcript) Response:")
-    # print(response3)

@@ -4,7 +4,7 @@ from sentence_transformers import SentenceTransformer
 import os
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-def process_transcript(user_id, project, transcript_path):
+def process_transcript(user_id, project, transcript_path, meeting_type):
     # Set up persistent ChromaDB client
     persist_directory = "chroma_db"
     client = chromadb.PersistentClient(path=persist_directory)
@@ -29,7 +29,7 @@ def process_transcript(user_id, project, transcript_path):
     embeddings = model.encode(chunks, show_progress_bar=True).tolist()
 
     ids = [f"transcript_chunk_{user_id}_{i}" for i in range(len(chunks))]
-    metadatas = [{"source": transcript_path} for _ in range(len(chunks))]
+    metadatas = [{"source": transcript_path, "meeting_type": meeting_type} for _ in range(len(chunks))]
     documents = chunks
 
     collection.add(
@@ -40,7 +40,6 @@ def process_transcript(user_id, project, transcript_path):
     )
 
     print(f"Transcript for {user_id} in {project} processed into {len(chunks)} chunks.")
-
 # Example usage
 if __name__ == "__main__":
-    process_transcript("user1", "ProjectA", "transcripts/transcript.txt")
+    process_transcript("user1", "ProjectA", "transcripts/transcript.txt","Technical Meeting")
