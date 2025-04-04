@@ -2,26 +2,32 @@ import chromadb
 import requests
 import json
 import re
+from sentence_transformers import SentenceTransformer
+import os
 
+model_path = os.path.join(os.path.dirname(__file__), "models", "all-mpnet-base-v2")
+embedding_model = SentenceTransformer(model_path)
 # --- Query Functions ---
-def query_shared_collection(project, query_text, n_results=2):
+
+def query_shared_collection(project, query_text, n_results=1):
     """Retrieve multiple documents from the shared project collection."""
     persist_directory = "chroma_db"
     client = chromadb.PersistentClient(path=persist_directory)
     collection = client.get_collection(f"{project}_shared")
-    results = collection.query(query_texts=[query_text], n_results=n_results)
+    query_embedding = embedding_model.encode(query_text).tolist()  # Encode the query
+    results = collection.query(query_embeddings=[query_embedding], n_results=n_results)
     if results['documents'] and results['documents'][0]:
         return "\n".join([f"- {doc}" for doc in results['documents'][0]])
     return "No shared project data available."
 
 def query_user_collection(user_id, project, query_text, n_results=1):
-    """Retrieve documents from the user-specific collection."""
     persist_directory = "chroma_db"
     client = chromadb.PersistentClient(path=persist_directory)
     collection_name = f"{project}_{user_id}"
     try:
         collection = client.get_collection(collection_name)
-        results = collection.query(query_texts=[query_text], n_results=n_results)
+        query_embedding = embedding_model.encode(query_text).tolist()  # Encode the query
+        results = collection.query(query_embeddings=[query_embedding], n_results=n_results)
         if results['documents'] and results['documents'][0]:
             return "\n".join([f"- {doc}" for doc in results['documents'][0]])
         return "No user-specific data available."
@@ -92,13 +98,13 @@ if __name__ == "__main__":
     project = "ProjectA"
     
     # Test with a question
-    query1 = "What is the main topic?"
+    query1 = "When was Shivaji named Chhatrapati?"
     response1 = rag_query(user_id, project, query1)
     print("Question Response:")
     print(response1)
     
     # Test with a summarization request
-    query2 = "Summarize the video"
+    query2 = "Summarize the Battle of Purandar"
     response2 = rag_query(user_id, project, query2)
     print("\nSummarization Response:")
     print(response2)
