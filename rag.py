@@ -2,25 +2,24 @@ import chromadb
 import requests
 import json
 import re
-from sentence_transformers import SentenceTransformer
-import os
+from utils import embedding_model
 
-# Load the embedding model
-model_path = os.path.join(os.path.dirname(__file__), "models", "all-mpnet-base-v2")
-embedding_model = SentenceTransformer(model_path)
 
 # --- Query Functions ---
 
-def query_shared_collection(project, query_text, n_results=1):
+def query_shared_collection(project, query_text, n_results=2):
     """Retrieve multiple documents from the shared project collection."""
     persist_directory = "chroma_db"
     client = chromadb.PersistentClient(path=persist_directory)
-    collection = client.get_collection(f"{project}_shared")
-    query_embedding = embedding_model.encode(query_text).tolist()  # Encode the query
-    results = collection.query(query_embeddings=[query_embedding], n_results=n_results)
-    if results['documents'] and results['documents'][0]:
-        return "\n".join([f"- {doc}" for doc in results['documents'][0]])
-    return "No shared project data available."
+    try:
+        collection = client.get_collection(f"{project}_shared")
+        query_embedding = embedding_model.encode(query_text).tolist()
+        results = collection.query(query_embeddings=[query_embedding], n_results=n_results)
+        if results['documents'] and results['documents'][0]:
+            return "\n".join([f"- {doc}" for doc in results['documents'][0]])
+        return "No shared project data available."
+    except ValueError:
+        return "Shared project data not initialized."
 
 def query_user_collection(user_id, project, query_text, n_results=1):
     """Retrieve document and meeting type from the user-specific collection."""
@@ -29,11 +28,11 @@ def query_user_collection(user_id, project, query_text, n_results=1):
     collection_name = f"{project}_{user_id}"
     try:
         collection = client.get_collection(collection_name)
-        query_embedding = embedding_model.encode(query_text).tolist()  # Encode the query
+        query_embedding = embedding_model.encode(query_text).tolist()
         results = collection.query(query_embeddings=[query_embedding], n_results=n_results)
         if results['documents'] and results['documents'][0]:
-            doc = results['documents'][0][0]  # Get the first document
-            meeting_type = results['metadatas'][0][0].get("meeting_type", "Unknown")  # Get meeting type from metadata
+            doc = results['documents'][0][0]
+            meeting_type = results['metadatas'][0][0].get("meeting_type", "Unknown")
             return doc, meeting_type
         return "No user-specific data available.", "Unknown"
     except ValueError:
@@ -42,91 +41,85 @@ def query_user_collection(user_id, project, query_text, n_results=1):
 # --- Llama 3 Response ---
 def get_llama3_response(prompt):
     """Call Llama 3 API with streaming response."""
-    response = requests.post(
-        "http://localhost:11434/api/generate",
-        json={"model": "llama3:8b", "prompt": prompt, "stream": True},
-        stream=True
-    )
-    response.raise_for_status()
-    
-    full_response = ""
-    for line in response.iter_lines():
-        if line:
-            try:
-                json_data = json.loads(line.decode('utf-8'))
-                if 'response' in json_data:
-                    full_response += json_data['response']
-            except json.JSONDecodeError as e:
-                print(f"Error decoding JSON chunk: {e}")
-                continue
-    return full_response
+    try:
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={"model": "llama3:8b", "prompt": prompt, "stream": True},
+            stream=True
+        )
+        response.raise_for_status()
+        
+        full_response = ""
+        for line in response.iter_lines():
+            if line:
+                try:
+                    json_data = json.loads(line.decode('utf-8'))
+                    if 'response' in json_data:
+                        full_response += json_data['response']
+                except json.JSONDecodeError as e:
+                    print(f"Error decoding JSON chunk: {e}")
+                    continue
+        return full_response.strip() or "No response generated."
+    except requests.RequestException as e:
+        return f"Error contacting Llama 3 API: {str(e)}"
 
-# --- Optimized RAG Query ---
+# --- Enhanced RAG Query ---
 def rag_query(user_id, project, query_text):
-    """Generate an optimized RAG prompt tailored to the meeting type and query intent."""
+    """Generate an optimized RAG prompt with improved intent detection and formatting."""
     # Retrieve documents and meeting type
     shared_docs = query_shared_collection(project, query_text, n_results=2)
     user_doc, meeting_type = query_user_collection(user_id, project, query_text, n_results=1)
     
-    # Set base instruction based on meeting type
-    if meeting_type == "Technical Meeting":
-        base_instruction = "Focus on technical details, problem-solving steps, project updates, and action items."
-    elif meeting_type == "KT Session":
-        base_instruction = "Summarize key knowledge points, explain concepts clearly with examples if possible, and highlight processes or best practices."
-    elif meeting_type == "Townhall Meeting":
-        base_instruction = "Offer insights into company announcements, policy changes, and strategic directions in a concise and narrative style."
-    else:
-        base_instruction = "Provide a relevant response based on the available data."
-
-    # Detect query intent
-    is_summarization = bool(re.search(r"summari[zs]e|summary", query_text, re.IGNORECASE))
-    is_explanation = bool(re.search(r"explain|why|how", query_text, re.IGNORECASE))
+    # Enhanced Query Intent Detection
+    query_lower = query_text.lower()
+    is_summarization = bool(re.search(r"summari[zs]e|summary|overview", query_lower))
+    is_explanation = bool(re.search(r"explain|how|why|what is", query_lower))
+    is_list = bool(re.search(r"list|steps|items|details", query_lower))
     
+    # Meeting Type Instructions
+    meeting_instructions = {
+        "Technical Meeting": "Focus on technical details, problem-solving steps, and action items.",
+        "KT Session": "Explain concepts clearly with examples, focusing on processes or best practices.",
+        "Townhall Meeting": "Provide concise insights into announcements, policies, or strategic directions.",
+        "Unknown": "Respond based on available data, keeping it relevant and clear."
+    }
+    base_instruction = meeting_instructions.get(meeting_type, meeting_instructions["Unknown"])
+
+    # Build Instruction Based on Intent
     if is_summarization:
-        instruction = f"Provide a concise summary (2-3 sentences) that {base_instruction.lower()}"
+        instruction = f"Summarize in 2-3 sentences, {base_instruction.lower()}"
+        format_instruction = "Use plain text."
     elif is_explanation:
-        instruction = f"Offer a clear, step-by-step explanation that {base_instruction.lower()}"
+        instruction = f"Explain step-by-step, {base_instruction.lower()}"
+        format_instruction = "Use numbered steps if applicable."
+    elif is_list:
+        instruction = f"Provide a detailed response, {base_instruction.lower()}"
+        format_instruction = "Use bullet points for key items or steps."
     else:
-        instruction = f"Answer the query directly and accurately, ensuring to {base_instruction.lower()}"
+        instruction = f"Answer directly, {base_instruction.lower()}"
+        format_instruction = "Use plain text; if the query is unclear, ask for clarification."
 
-    # Build the optimized prompt
-    prompt = f"""You are a professional AI assistant for an IT company, specializing in analyzing and responding to queries based on technical meetings, knowledge transfer (KT) sessions, and townhall meetings. Your goal is to deliver clear, accurate, and contextually relevant responses to assist employees.
-
-**Instructions**:
-- {instruction}
-- Use a professional yet approachable tone.
-- For technical queries, provide detailed explanations and define complex terms if necessary; for broader queries, focus on key points.
-- If the query is unclear, ask the user for clarification.
-- If user-specific data is unavailable, rely on shared project data to provide a general response.
-
-**Shared Project Data**:
-{shared_docs}
-
-**User-Specific Data ({meeting_type} Transcript)**:
-{user_doc if user_doc != "No user-specific data available." else "None available."}
-
-**Query**:
-{query_text}
-
-**Response**:
+    # Optimized Prompt
+    prompt = f"""You are an IT assistant for technical meetings, KT sessions, and townhalls.  
+**Instructions**:  
+- {instruction}  
+- {format_instruction}  
+- Keep responses professional, concise, and relevant. Define technical terms if needed.  
+**Shared Data**:  
+{shared_docs}  
+**User Data ({meeting_type})**:  
+{user_doc}  
+**Query**:  
+{query_text}  
+**Response**:  
 """
-    # Get response from Llama 3
+
+    # Get and return response
     response = get_llama3_response(prompt)
     return response
 
-# --- Test the Optimized RAG ---
-if __name__ == "__main__":
-    user_id = "user1"
-    project = "ProjectA"
-    
-    # Test with a question
-    query1 = "When was Shivaji named Chhatrapati?"
-    response1 = rag_query(user_id, project, query1)
-    print("Question Response:")
-    print(response1)
-    
-    # Test with a summarization request
-    query2 = "Summarize the Battle of Purandar"
-    response2 = rag_query(user_id, project, query2)
-    print("\nSummarization Response:")
-    print(response2)
+# Example usage
+# if __name__ == "__main__":
+#     print(rag_query("user1", "ProjectA", "Summarize the last technical meeting"))
+#     print(rag_query("user1", "ProjectA", "How does the deployment process work?"))
+#     print(rag_query("user1", "ProjectA", "List the action items from the KT session"))

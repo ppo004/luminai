@@ -3,6 +3,7 @@ import chromadb
 from sentence_transformers import SentenceTransformer
 import os
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from utils import embedding_model as model
 
 def process_transcript(user_id, project, transcript_path, meeting_type):
     # Set up persistent ChromaDB client
