@@ -2,6 +2,7 @@ import chromadb
 from sentence_transformers import SentenceTransformer
 import os
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from utils import embedding_model as model
 
 # Set up persistent ChromaDB client
 persist_directory = "chroma_db"
@@ -9,7 +10,7 @@ client = chromadb.PersistentClient(path=persist_directory)
 
 # Define projects and their shared data files
 projects = {
-    "ProjectA": "transcripts/shivaji.txt"
+    "ProjectA": "transcripts/masterData.txt"
 }
 model_path = os.path.join(os.path.dirname(__file__), "models", "all-mpnet-base-v2")
 model = SentenceTransformer(model_path)
