@@ -10,7 +10,7 @@ client = chromadb.PersistentClient(path=persist_directory)
 
 # Define projects and their shared data files
 projects = {
-    "ProjectA": "transcripts/masterData.txt"
+    "SonarQube": "data/sonarqube1.txt"
 }
 model_path = os.path.join(os.path.dirname(__file__), "models", "all-mpnet-base-v2")
 model = SentenceTransformer(model_path)
