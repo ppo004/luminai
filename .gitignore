@@ -2,3 +2,4 @@
 /chroma_db
 /data
 /models
+.env
