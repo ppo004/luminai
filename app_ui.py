@@ -115,7 +115,7 @@ with st.sidebar:
                         st.session_state.session_id = None
                         st.session_state.chat_history = []
                         st.success("Session deleted!")
-                        st.rerun()
+                        st.rerun()                   
                     else:
                         st.error("Failed to delete session")
                 except Exception as e:
