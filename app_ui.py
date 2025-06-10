@@ -4,37 +4,122 @@ import json
 import time
 
 st.title("LuminAI")
-st.write(f"Hey Prajwal! How can I help with your project today?")
+st.write("Hey Prajwal! How can I help with your project today?")
 
-# Initialize session state for chat history if it doesn't exist
+# Initialize session state variables if they don't exist
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
+if 'session_id' not in st.session_state:
+    st.session_state.session_id = None
+if 'available_sessions' not in st.session_state:
+    st.session_state.available_sessions = {}
 
 # Hidden user ID, set default to "Prajwal"
 user_id = "Prajwal"
 
-# Settings in sidebar with meeting type default "Unknown"
+# Settings in sidebar
 with st.sidebar:
     st.header("Settings")
     project = st.text_input("Project", "ProjectA")
-    meeting_type = st.selectbox("Meeting Type", 
-                               ["Unknown", "Technical Meeting", "KT Session", "Townhall Meeting"],
-                               index=0)  # Set "Unknown" as default
     
-    # File upload
-    st.header("Upload the video")
-    uploaded_file = st.file_uploader("Select file", type=['txt'])
-    if uploaded_file is not None and st.button("Process Video"):
-        files = {"transcript": uploaded_file}
-        data = {"user_id": user_id, "project": project, "meeting_type": meeting_type}
+    # Session management
+    st.header("Sessions")
+    
+    # Fetch available sessions for the user and project
+    try:
+        response = requests.get(f"http://localhost:5001/api/sessions?user_id={user_id}&project={project}")
+        if response.status_code == 200:
+            st.session_state.available_sessions = response.json().get("sessions", {})
+        else:
+            st.warning("Could not fetch sessions")
+    except Exception as e:
+        st.warning("Error connecting to server")
+    
+    # Create a new session button
+    if st.button("Create New Session"):
         try:
-            response = requests.post("http://localhost:5000/api/upload", files=files, data=data)
-            if response.status_code == 200:
-                st.success("Got it! Your video has been processed.")
+            response = requests.post("http://localhost:5001/api/sessions/create", 
+                                    data={"user_id": user_id, "project": project})
+            if response.status_code == 201:
+                session_data = response.json()
+                st.session_state.session_id = session_data["session_id"]
+                st.session_state.chat_history = []
+                st.success("New session created!")
+                st.rerun()  # Refresh to update session list
             else:
-                st.error(f"Hmm, something went wrong with the upload.")
+                st.error("Failed to create new session")
         except Exception as e:
             st.error("Connection error. Check if the server is running.")
+    
+    # Display available sessions
+    if st.session_state.available_sessions:
+        st.subheader("Your Sessions")
+        sessions = st.session_state.available_sessions
+        session_names = {sid: session.get("name", f"Session {i+1}") 
+                        for i, (sid, session) in enumerate(sessions.items())}
+        
+        # If we have a current session ID but it doesn't match any loaded session,
+        # reset it to None (this can happen when switching projects)
+        if st.session_state.session_id and st.session_state.session_id not in session_names:
+            st.session_state.session_id = None
+            st.session_state.chat_history = []
+        
+        # Select a session
+        selected_session_name = st.selectbox(
+            "Select a session", 
+            list(session_names.values()),
+            index=list(session_names.values()).index(
+                session_names.get(st.session_state.session_id, list(session_names.values())[0])
+            ) if st.session_state.session_id in session_names else 0
+        )
+        
+        # Find the session ID from the name
+        selected_session_id = next(
+            (sid for sid, name in session_names.items() if name == selected_session_name), 
+            None
+        )
+        
+        # Update session state if selection changed
+        if selected_session_id and selected_session_id != st.session_state.session_id:
+            st.session_state.session_id = selected_session_id
+            st.session_state.chat_history = []  # Clear local history when switching
+            st.rerun()  # Refresh to ensure consistency
+    
+    # Session actions
+    if st.session_state.session_id:
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Clear History"):
+                try:
+                    response = requests.post("http://localhost:5001/api/sessions/clear", 
+                                           data={"user_id": user_id, 
+                                                "project": project, 
+                                                "session_id": st.session_state.session_id})
+                    if response.status_code == 200:
+                        st.session_state.chat_history = []
+                        st.success("History cleared!")
+                        st.rerun()
+                    else:
+                        st.error("Failed to clear history")
+                except Exception as e:
+                    st.error("Connection error")
+        
+        with col2:
+            if st.button("Delete Session"):
+                try:
+                    response = requests.post("http://localhost:5001/api/sessions/delete", 
+                                           data={"user_id": user_id, 
+                                                "project": project, 
+                                                "session_id": st.session_state.session_id})
+                    if response.status_code == 200:
+                        st.session_state.session_id = None
+                        st.session_state.chat_history = []
+                        st.success("Session deleted!")
+                        st.rerun()
+                    else:
+                        st.error("Failed to delete session")
+                except Exception as e:
+                    st.error("Connection error")
 
 # Main chat area
 st.header("Chat")
@@ -62,9 +147,21 @@ if query:
     
     # Stream the response
     try:
-        data = {"user_id": user_id, "project": project, "query_text": query, "stream": "true"}
-        with requests.post("http://localhost:5000/api/query", data=data, stream=True) as response:
+        data = {
+            "user_id": user_id, 
+            "project": project, 
+            "query_text": query, 
+            "stream": "true"
+        }
+        
+        # Add session_id if it exists
+        if st.session_state.session_id:
+            data["session_id"] = st.session_state.session_id
+        
+        with requests.post("http://127.0.0.1:5001/api/query", data=data, stream=True) as response:
             if response.status_code == 200:
+                current_session_id = st.session_state.session_id
+                
                 for line in response.iter_lines():
                     if line:
                         try:
@@ -72,11 +169,19 @@ if query:
                             if line_text.startswith("data: "):
                                 json_str = line_text[6:]  # Remove "data: " prefix
                                 chunk_data = json.loads(json_str)
-                                chunk = chunk_data.get("chunk", "")
-                                full_response += chunk
-                                # Update the message with the accumulated response
-                                message_placeholder.markdown(full_response + "▌")
-                                time.sleep(0.01)  # Small delay for smoother appearance
+                                
+                                # Check if this is a session_id update
+                                if 'session_id' in chunk_data:
+                                    current_session_id = chunk_data['session_id']
+                                    # Update session state with the new ID if none exists
+                                    if not st.session_state.session_id:
+                                        st.session_state.session_id = current_session_id
+                                elif 'chunk' in chunk_data:
+                                    chunk = chunk_data.get("chunk", "")
+                                    full_response += chunk
+                                    # Update the message with the accumulated response
+                                    message_placeholder.markdown(full_response + "▌")
+                                    time.sleep(0.01)  # Small delay for smoother appearance
                         except Exception as e:
                             print(f"Error processing chunk: {e}")
                 
@@ -84,6 +189,11 @@ if query:
                 message_placeholder.markdown(full_response)
                 # Add the complete response to chat history
                 st.session_state.chat_history.append({"role": "assistant", "content": full_response})
+                
+                # Store the session ID if it was updated
+                if current_session_id != st.session_state.session_id:
+                    st.session_state.session_id = current_session_id
+                    st.rerun()  # Refresh to update UI with new session
             else:
                 error_msg = "I couldn't process that request. Want to try again?"
                 message_placeholder.markdown(error_msg)
@@ -92,8 +202,3 @@ if query:
         error_msg = "Oops! There was a connection problem. Make sure your backend server is running."
         message_placeholder.markdown(error_msg)
         st.session_state.chat_history.append({"role": "assistant", "content": error_msg})
-
-# Add option to clear chat history with casual language
-if st.session_state.chat_history and st.sidebar.button("Start Fresh"):
-    st.session_state.chat_history = []
-    st.rerun()

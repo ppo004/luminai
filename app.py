@@ -1,46 +1,47 @@
-from flask import Flask, request, jsonify, Response
+"""
+Main application entry point.
+This file initializes the Flask application and registers all routes.
+"""
+from flask import Flask
 from flask_cors import CORS
-from rag import rag_query
-from process_transcript import process_transcript
-import os
-import json
+import config
 
-app = Flask(__name__)
-CORS(app)  # Allow Angular to connect
-app.config['UPLOAD_FOLDER'] = 'data'
+# Import route blueprints
+from api.query_routes import query_bp
+from api.session_routes import session_bp
+from api.upload_routes import upload_bp
 
-@app.route('/api/upload', methods=['POST'])
-def upload():
-    user_id = request.form['user_id']
-    project = request.form['project']
-    meeting_type = request.form['meeting_type']
-    file = request.files['transcript']
-    if file:
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], f"{user_id}_{file.filename}")
-        file.save(filepath)
-        process_transcript(user_id, project, filepath, meeting_type)
-        return jsonify({"message": "Upload successful"}), 200
-    return jsonify({"error": "No file"}), 400
-
-@app.route('/api/query', methods=['POST'])
-def query():
-    user_id = request.form['user_id']
-    project = request.form['project']
-    query_text = request.form['query_text']
-    print(user_id, project, query_text)
-
-    # Check if streaming is requested
-    stream = request.form.get('stream', 'false').lower() == 'true'
+def create_app():
+    """
+    Create and configure the Flask application.
     
-    if stream:
-        def generate():
-            response_generator = rag_query(user_id, project, query_text, stream=True)
-            for chunk in response_generator:
-                yield f"data: {json.dumps({'chunk': chunk})}\n\n"
-        return Response(generate(), mimetype='text/event-stream')
-    else:
-        res = rag_query(user_id, project, query_text)
-        return jsonify({"response": res}), 200
+    Returns:
+        Flask: Configured Flask application
+    """
+    # Initialize Flask app
+    app = Flask(__name__)
     
+    # Enable CORS
+    CORS(app)
+    
+    # Configure app
+    app.config['UPLOAD_FOLDER'] = config.UPLOAD_FOLDER
+    app.config['DEBUG'] = config.DEBUG
+    
+    # Register blueprints
+    app.register_blueprint(query_bp)
+    app.register_blueprint(session_bp)
+    app.register_blueprint(upload_bp)
+    
+    return app
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Create the application
+    app = create_app()
+    
+    # Run the application
+    app.run(
+        host=config.HOST,
+        port=config.PORT,
+        debug=config.DEBUG
+    )
