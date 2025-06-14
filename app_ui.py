@@ -20,7 +20,7 @@ user_id = "Prajwal"
 # Settings in sidebar
 with st.sidebar:
     st.header("Settings")
-    project = st.text_input("Project", "ProjectA")
+    project = st.text_input("Project", "EGPP")
     
     # Session management
     st.header("Sessions")
@@ -82,7 +82,27 @@ with st.sidebar:
         # Update session state if selection changed
         if selected_session_id and selected_session_id != st.session_state.session_id:
             st.session_state.session_id = selected_session_id
-            st.session_state.chat_history = []  # Clear local history when switching
+            
+            # Fetch the conversation history for the selected session
+            try:
+                response = requests.get(
+                    f"http://localhost:5001/api/sessions/history",
+                    params={
+                        "user_id": user_id,
+                        "project": project,
+                        "session_id": selected_session_id
+                    }
+                )
+                if response.status_code == 200:
+                    # Replace local history with the fetched history
+                    history_data = response.json().get("history", [])
+                    st.session_state.chat_history = history_data
+                else:
+                    st.session_state.chat_history = []  # Clear if fetch fails
+            except Exception as e:
+                st.error(f"Failed to fetch session history: {e}")
+                st.session_state.chat_history = []  # Clear if fetch fails
+            
             st.rerun()  # Refresh to ensure consistency
     
     # Session actions

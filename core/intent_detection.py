@@ -3,15 +3,7 @@ Intent detection module for query classification.
 """
 
 def detect_intent(query_text):
-    """
-    Detect query intent using weighted keywords with domain-specific terms.
-    
-    Args:
-        query_text (str): The user's query text
-        
-    Returns:
-        str: Detected intent (summarization, explanation, list, or general)
-    """
+
     query_lower = " ".join(query_text.lower().split())
     words = query_lower.split()
     
@@ -56,15 +48,6 @@ def detect_intent(query_text):
     return top_intent
 
 def get_instruction_and_format(intent):
-    """
-    Get instruction and format guidance based on the detected intent.
-    
-    Args:
-        intent (str): The detected intent
-        
-    Returns:
-        tuple: (instruction, format_instruction)
-    """
     if intent == "summarization":
         instruction = "Summarize in 6-7 sentences."
         format_instruction = "Use plain text."

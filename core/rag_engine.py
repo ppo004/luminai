@@ -1,6 +1,3 @@
-"""
-RAG (Retrieval Augmented Generation) engine.
-"""
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -16,10 +13,8 @@ from core.session_manager import (
 )
 from utils.embedding_utils import get_vectorstore, format_docs
 
-# Initialize LLM
 llm = ChatOllama(model=config.LLM_MODEL, base_url=config.OLLAMA_BASE_URL)
 
-# Define prompt template
 prompt_template_str = """You are an assistant for project onboarding, documentation, PBIs, HR, and internal tools.
 {instruction_details}
 Keep responses professional, concise, and relevant. Define technical terms if needed.
@@ -53,34 +48,13 @@ def rag_query(user_id, project, query_text, stream=False, session_id=None, creat
     Returns:
         dict or generator: Response data or stream
     """
-    print(f"RAG query for project: {project}, user: {user_id}")
-    
-    # Check if query contains session management commands
-    if query_text.lower().startswith("/new_session"):
-        create_new = True
-        # Extract the actual query if provided after command
-        parts = query_text.split(" ", 1)
-        if len(parts) > 1:
-            query_text = parts[1]
-        else:
-            return "Started a new conversation session. What would you like to know?"
-    
-    elif query_text.lower().startswith("/clear_history"):
-        clear_session_history(user_id, project, session_id)
-        parts = query_text.split(" ", 1)
-        if len(parts) > 1:
-            query_text = parts[1]
-        else:
-            return "Conversation history cleared. What would you like to know?"
-    
-    # Get or create session based on parameters
+    print(f"RAG query for project: {project}, user: {user_id}, seesion id: {session_id}")
+
     memory, active_session_id = get_or_create_session(user_id, project, session_id, create_new)
-    
-    # Get vector store and retriever
+
     vectorstore = get_vectorstore(project)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
 
-    # Detect intent and get formatting instructions
     intent = detect_intent(query_text)
     print(f"Detected intent: {intent}")
 
@@ -95,10 +69,8 @@ def rag_query(user_id, project, query_text, stream=False, session_id=None, creat
         f"- Consider the conversation history for context"
     )
 
-    # Format chat history for inclusion in the prompt
     chat_history = format_chat_history(memory)
 
-    # Build the RAG chain
     rag_chain = (
         RunnablePassthrough.assign(
             context=lambda x: format_docs(retriever.invoke(x["input"])),
@@ -109,17 +81,14 @@ def rag_query(user_id, project, query_text, stream=False, session_id=None, creat
         | StrOutputParser()
     )
 
-    # Prepare inputs
     inputs = {
         "input": query_text,
         "instruction_details": instruction_details_str,
         "chat_history": chat_history
     }
     
-    # Increment message count
     increment_message_count(user_id, project, active_session_id)
     
-    # Handle streaming response
     if stream:
         response_stream = rag_chain.stream(inputs)
         full_response = ""
@@ -129,17 +98,11 @@ def rag_query(user_id, project, query_text, stream=False, session_id=None, creat
             full_response += chunk
             yield chunk
             
-        # Add to memory after streaming is complete
         memory.save_context({"input": query_text}, {"answer": full_response})
         
-        # Return the session ID as the last message
         yield f"session_id:{active_session_id}"
-    
-    # Handle non-streaming response
+
     else:
         response = rag_chain.invoke(inputs)
-        
-        # Add the exchange to memory
         memory.save_context({"input": query_text}, {"answer": response})
-        
         return {"response": response, "session_id": active_session_id}

@@ -1,28 +1,19 @@
-"""
-Query endpoints for RAG functionality.
-"""
 from flask import Blueprint, request, jsonify, Response
 import json
 from core.rag_engine import rag_query
 
-# Create blueprint
 query_bp = Blueprint('query', __name__)
 
 @query_bp.route('/api/query', methods=['POST'])
 def process_query():
-    """
-    Process a RAG query.
-    """
     user_id = request.form['user_id']
     project = request.form['project']
     query_text = request.form['query_text']
     
-    # Get optional session parameters
     session_id = request.form.get('session_id')
-    create_new = request.form.get('create_new', 'false').lower() == 'true'
     stream = request.form.get('stream', 'false').lower() == 'true'
     
-    print(f"Query for user: {user_id}, project: {project}, session: {session_id}, create_new: {create_new}")
+    print(f"Query for user: {user_id}, project: {project}, session: {session_id}")
     
     if stream:
         def generate():
@@ -31,8 +22,7 @@ def process_query():
                 project, 
                 query_text, 
                 stream=True, 
-                session_id=session_id, 
-                create_new=create_new
+                session_id=session_id
             )
             session_identifier = None
             for chunk in response_generator:
