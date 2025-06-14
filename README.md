@@ -43,7 +43,7 @@ pip install -r requirements.txt
 
 3. Initialize the ChromaDB:
 ```
-python -m seeders.chromadb_seeder
+python -m seeders.add_your_data_seeder_here.py
 ```
 
 4. Start the application:
